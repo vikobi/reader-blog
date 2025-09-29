@@ -184,6 +184,14 @@ resource "aws_security_group" "rds_sg" {
     security_groups = [aws_security_group.ec2_sg.id]
   }
 
+  ingress {
+    description     = "PostgreSQL from admin"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    cidr_blocks     = [var.my_ip]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -209,13 +217,14 @@ resource "aws_lb" "alb" {
   }
 }
 
-resource "aws_lb_target_group" "tg" {
-  name     = "${var.web-app}-tg"
-  port     = 80
+# Backend target group on port 4000
+resource "aws_lb_target_group" "tg_backend" {
+  name     = "${var.web-app}-backend"
+  port     = 4000
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
   health_check {
-    path                = "/about"
+    path                = "/health"
     protocol            = "HTTP"
     matcher             = "200-399"
     interval            = 30
@@ -225,38 +234,59 @@ resource "aws_lb_target_group" "tg" {
   }
 
   tags = {
-    Name = "${var.web-app}-tg"
+    Name = "${var.web-app}-backend-tg"
   }
 }
-resource "aws_lb_listener" "listener" {
+
+# Rule: /api/* goes to backend target group
+resource "aws_lb_listener_rule" "api_rule" {
+  listener_arn = aws_lb_listener.listener_frontend.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_backend.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
+  }
+}
+
+# Frontend target group on port 3000
+resource "aws_lb_target_group" "tg_frontend" {
+  name     = "${var.web-app}-frontend"
+  port     = 3000
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+
+  health_check {
+    path                = "/"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    matcher             = "200-399"
+  }
+    tags = {
+        Name = "${var.web-app}-frontend-tg"
+    }
+}
+resource "aws_lb_listener" "listener_frontend" {
   load_balancer_arn = aws_lb.alb.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.tg.arn
+    target_group_arn = aws_lb_target_group.tg_frontend.arn
   }
 }
 
-# Target group for port 3000
-resource "aws_lb_target_group" "tg_3000" {
-  name     = "${var.web-app}-tg-3000"
-  port     = 3000
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
-
-  health_check {
-    path                = "/about"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
-    matcher             = "200"
-  }
-    tags = {
-        Name = "${var.web-app}-tg-3000"
-    }
+output "application_load_balancer_dns" {
+  value = aws_lb.alb.dns_name
 }
 
 # ================================================================================
@@ -321,6 +351,7 @@ resource "aws_launch_template" "app" {
   security_groups             = [aws_security_group.ec2_sg.id]
 }
 
+
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2_profile.name
   }
@@ -346,9 +377,6 @@ resource "aws_launch_template" "app" {
     }
   }
 }
-output "name" {
-      value = aws_launch_template.app.name
-    }
 
 resource "aws_autoscaling_group" "app" {
   desired_capacity     = var.asg_desired_capacity
@@ -404,3 +432,7 @@ resource "aws_db_instance" "rds" {
 output "rds_endpoint" {
   value = aws_db_instance.rds.endpoint
 }
+
+output "rds_port" {
+  value = aws_db_instance.rds.port
+} 
