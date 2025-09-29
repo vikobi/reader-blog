@@ -387,7 +387,7 @@ resource "aws_autoscaling_group" "app" {
     id      = aws_launch_template.app.id
     version = "$Latest"
   }
-  target_group_arns = [aws_lb_target_group.tg_3000.arn]
+  target_group_arns = [aws_lb_target_group.tg_frontend.arn, aws_lb_target_group.tg_backend.arn]
 
   tag {
     key                 = "Name"
